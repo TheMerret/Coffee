@@ -1,19 +1,21 @@
 import sys
 import sqlite3
-from PyQt5 import QtCore, QtGui, QtWidgets, uic
+from PyQt5 import QtCore, QtGui, QtWidgets
+from design.mainDesign import Ui_MainWindow
+from design.addEditCoffeeFormDesign import Ui_Dialog
 
 
-class AddEditDialog(QtWidgets.QDialog):
+class AddEditDialog(QtWidgets.QDialog, Ui_Dialog):
     def __init__(self, parent, table_updater, db_con):
         super(AddEditDialog, self).__init__(parent)
         self.con = db_con
         self.variants = {}
         self.is_edit_mode = True
         self.table_updater = table_updater
-        uic.loadUi('addEditCoffeeForm.ui', self)
-        self.setupUi()
+        self.setupUi(self)
 
-    def setupUi(self):
+    def setupUi(self, Dialog):
+        super().setupUi(Dialog)
         self.spinBoxID.valueChanged.connect(self.set_dialog_type)
         self.set_variants()
         prev = self.spinBoxID.value()
@@ -132,15 +134,16 @@ class AddEditDialog(QtWidgets.QDialog):
         cur.execute(query)
 
 
-class MainWindow(QtWidgets.QMainWindow):
+class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def __init__(self):
         super(MainWindow, self).__init__()
-        uic.loadUi('main.ui', self)
-        self.con = sqlite3.connect('coffee.sqlite')
-        self.setupUi()
+        self.con = sqlite3.connect('data/coffee.sqlite')
+        self.setupUi(self)
 
-    def setupUi(self):
+    def setupUi(self, MainWindow):
+        super().setupUi(MainWindow)
+        self.setWindowIcon(QtGui.QIcon('coffee.svg'))
         self.actionAddEdit.triggered.connect(self.show_add_edit_dialog)
         self.display_table()
 
