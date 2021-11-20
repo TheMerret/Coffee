@@ -3,6 +3,135 @@ import sqlite3
 from PyQt5 import QtCore, QtGui, QtWidgets, uic
 
 
+class AddEditDialog(QtWidgets.QDialog):
+    def __init__(self, parent, table_updater, db_con):
+        super(AddEditDialog, self).__init__(parent)
+        self.con = db_con
+        self.variants = {}
+        self.is_edit_mode = True
+        self.table_updater = table_updater
+        uic.loadUi('addEditCoffeeForm.ui', self)
+        self.setupUi()
+
+    def setupUi(self):
+        self.spinBoxID.valueChanged.connect(self.set_dialog_type)
+        self.set_variants()
+        prev = self.spinBoxID.value()
+        self.spinBoxID.valueChanged.emit(prev)
+        self.btnAddEdit.clicked.connect(self.add_edit_item)
+
+    def set_variants(self):
+        cur = self.con.cursor()
+        grind_levels = cur.execute("""SELECT ID, GrindLevel FROM GrindLevels""").fetchall()
+        self.variants['grind_levels'] = [{'id': id_, 'level': level} for id_, level in grind_levels]
+        self.comboBoxGrindLevel.addItems([i for _, i in grind_levels])
+        roast_levels = cur.execute("""SELECT ID, RoastLevel FROM RoastLevels""").fetchall()
+        self.variants['roast_levels'] = [{'id': id_, 'level': level} for id_, level in roast_levels]
+        self.comboBoxRoastLevel.addItems([i for _, i in roast_levels])
+
+    def clear_current_data(self):
+        self.lineEditName.clear()
+        self.lineEditVarietyName.clear()
+        self.comboBoxRoastLevel.setCurrentIndex(0)
+        self.comboBoxGrindLevel.setCurrentIndex(0)
+        self.lineEditTasteDescription.clear()
+        self.spinBoxPrice.setValue(self.spinBoxPrice.minimum())
+        self.spinBoxPackingVolume.setValue(self.spinBoxPackingVolume.minimum())
+
+    def set_item_data(self, id_):
+        cur = self.con.cursor()
+        item_data = cur.execute("""SELECT * FROM Coffee WHERE ID = ? """, (id_,)).fetchone()
+        (_, name, variety_name, roast_level, grind_level,
+         taste_desc, price, packing_volume, _) = item_data
+        roast_level = [i for i in self.variants['roast_levels']
+                       if i['id'] == roast_level][0]['level']
+        grind_level = [i for i in self.variants['grind_levels']
+                       if i['id'] == grind_level][0]['level']
+        self.lineEditName.setText(name)
+        self.lineEditVarietyName.setText(variety_name)
+        self.comboBoxRoastLevel.setCurrentText(roast_level)
+        self.comboBoxGrindLevel.setCurrentText(grind_level)
+        self.lineEditTasteDescription.setText(taste_desc)
+        self.spinBoxPrice.setValue(price)
+        self.spinBoxPackingVolume.setValue(packing_volume)
+
+    def set_dialog_type(self):
+        cur = self.con.cursor()
+        ids = cur.execute("""SELECT ID FROM Coffee""")
+        ids = [i for i, in ids]
+        current_id = self.spinBoxID.value()
+        self.clear_current_data()
+        if current_id in ids:
+            self.set_item_data(current_id)
+            self.btnAddEdit.setText('Изменить')
+            self.is_edit_mode = True
+        else:
+            self.clear_current_data()
+            self.btnAddEdit.setText('Добавить')
+            self.is_edit_mode = False
+
+    def add_edit_item(self):
+        try:
+            if self.is_edit_mode:
+                self.edit_item()
+            else:
+                self.add_item()
+        except ValueError:
+            QtWidgets.QMessageBox.warning(self, 'Ошибка', 'Введите данные')
+            return
+        except sqlite3.IntegrityError:
+            QtWidgets.QMessageBox.warning(self, 'Ошибка', 'Кофе с таким названием уже существует')
+            return
+        reply = QtWidgets.QMessageBox.question(self, 'Подтвердить',
+                                               f'Вы уверены, что хотите '
+                                               f'{"изменить" if self.is_edit_mode else "добавить"}'
+                                               f' элемент?')
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.con.commit()
+            self.table_updater()
+
+    def get_new_values(self):
+        name = self.lineEditName.text()
+        variety_name = self.lineEditVarietyName.text()
+        roast_level = self.comboBoxRoastLevel.currentText()
+        roast_level = [i for i in self.variants['roast_levels']
+                       if i['level'] == roast_level][0]['id']
+        grind_level = self.comboBoxGrindLevel.currentText()
+        grind_level = [i for i in self.variants['grind_levels']
+                       if i['level'] == grind_level][0]['id']
+        taste_desc = self.lineEditTasteDescription.text()
+        price = self.spinBoxPrice.value()
+        volume = self.spinBoxPackingVolume.value()
+        if '' in (name, variety_name, taste_desc):
+            raise ValueError('Empty values')
+        values = {'Name': name, 'VarietyName': variety_name, 'RoastLevel': roast_level, 'GrindLevel':
+                  grind_level, 'TasteDescription': taste_desc, 'Price': price,
+                  'PackingVolume': volume}
+        return values
+
+    def edit_item(self):
+        current_id = self.spinBoxID.value()
+        cur = self.con.cursor()
+        query = "UPDATE Coffee SET"
+        new_values = self.get_new_values()
+        for key, value in new_values.items():
+            query += f' {key} = "{value}",'
+        query = query[:-1]
+        query += ' '
+        query += f"WHERE ID = {current_id}"
+        cur.execute(query)
+
+    def add_item(self):
+        current_id = self.spinBoxID.value()
+        cur = self.con.cursor()
+        new_values = self.get_new_values()
+        query = f"INSERT INTO Coffee(\"ID\", " \
+                f"{', '.join(chr(34) + str(i) + chr(34) for i in new_values.keys())}) "
+        query += f"VALUES({str(current_id)}, " \
+                 f"{', '.join(chr(34) + str(i) + chr(34) for i in new_values.values())})"
+        cur.execute(query)
+
+
 class MainWindow(QtWidgets.QMainWindow):
 
     def __init__(self):
@@ -12,6 +141,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setupUi()
 
     def setupUi(self):
+        self.actionAddEdit.triggered.connect(self.show_add_edit_dialog)
         self.display_table()
 
     def get_db_data(self):
@@ -26,7 +156,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def display_table(self):
         header = ['Название', 'Название сорта', 'Степень обжарки', 'Степень помола',
                   'Описание вкуса', 'Цена', 'Объем упаковки']
-        self.tableCoffee: QtWidgets.QTableWidget
         self.tableCoffee.setColumnCount(len(header))
         self.tableCoffee.setRowCount(0)
         self.tableCoffee.setHorizontalHeaderLabels(header)
@@ -36,6 +165,31 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tableCoffee.rowCount() + 1)
             for col_ind, col in enumerate(row):
                 self.tableCoffee.setItem(row_ind, col_ind, QtWidgets.QTableWidgetItem(col))
+
+    def show_add_edit_dialog(self):
+        dialog = AddEditDialog(self, self.display_table, self.con)
+        dialog.exec()
+
+    def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
+        if a0.key() in (QtCore.Qt.Key_Backspace, QtCore.Qt.Key_Delete):
+            rows = [i.row() for i in self.tableCoffee.selectionModel().selectedRows()]
+            if not rows:
+                return
+            reply = QtWidgets.QMessageBox.question(self, 'Подтвердить', f'Вы уверены,'
+                                                                        f' что хотите удалить'
+                                                                        f' строки в количестве'
+                                                                        f' {len(rows)}?')
+            if reply == QtWidgets.QMessageBox.Yes:
+                self.remove_entries(rows)
+
+    def remove_entries(self, rows):
+        self.tableCoffee: QtWidgets.QTableWidget
+        for row in rows:
+            name = self.tableCoffee.item(row, 0).text()
+            cur = self.con.cursor()
+            cur.execute("""DELETE FROM Coffee WHERE Name = ?""", (name, ))
+            self.tableCoffee.removeRow(row)
+        self.con.commit()
 
 
 def main():
