@@ -6,6 +6,7 @@ from design.addEditCoffeeFormDesign import Ui_Dialog
 
 
 class AddEditDialog(QtWidgets.QDialog, Ui_Dialog):
+
     def __init__(self, parent, table_updater, db_con):
         super(AddEditDialog, self).__init__(parent)
         self.con = db_con
@@ -16,8 +17,10 @@ class AddEditDialog(QtWidgets.QDialog, Ui_Dialog):
 
     def setupUi(self, Dialog):
         super().setupUi(Dialog)
-        self.spinBoxID.valueChanged.connect(self.set_dialog_type)
         self.set_variants()
+        self.comboBoxMode.currentTextChanged.connect(self.set_dialog_type)
+        self.comboBoxMode.currentTextChanged.emit(self.comboBoxMode.currentText())
+        self.spinBoxID.valueChanged.connect(self.update_edit_data)
         prev = self.spinBoxID.value()
         self.spinBoxID.valueChanged.emit(prev)
         self.btnAddEdit.clicked.connect(self.add_edit_item)
@@ -57,20 +60,31 @@ class AddEditDialog(QtWidgets.QDialog, Ui_Dialog):
         self.spinBoxPrice.setValue(price)
         self.spinBoxPackingVolume.setValue(packing_volume)
 
-    def set_dialog_type(self):
+    def update_edit_data(self, id_):
+        if not self.is_edit_mode:
+            return
+        self.set_item_data(id_)
+
+    def set_dialog_type(self, cur_mode):
         cur = self.con.cursor()
         ids = cur.execute("""SELECT ID FROM Coffee""")
         ids = [i for i, in ids]
-        current_id = self.spinBoxID.value()
+        if not ids:
+            ids = [0]
+            self.comboBoxMode.setCurrentText('Добавление')
+            cur_mode = 'Добавление'
+        min_id, max_id = min(ids), max(ids)
         self.clear_current_data()
-        if current_id in ids:
-            self.set_item_data(current_id)
+        if cur_mode == 'Изменение':
+            self.spinBoxID.setRange(min_id, max_id)
+            self.spinBoxID.setValue(min_id)
+            self.set_item_data(self.spinBoxID.value())
             self.btnAddEdit.setText('Изменить')
             self.is_edit_mode = True
-        else:
-            self.clear_current_data()
-            self.btnAddEdit.setText('Добавить')
+        elif cur_mode == 'Добавление':
             self.is_edit_mode = False
+            self.spinBoxID.setRange(max_id + 1, 2147483647)
+            self.btnAddEdit.setText('Добавить')
 
     def add_edit_item(self):
         try:
@@ -107,7 +121,7 @@ class AddEditDialog(QtWidgets.QDialog, Ui_Dialog):
         if '' in (name, variety_name, taste_desc):
             raise ValueError('Empty values')
         values = {'Name': name, 'VarietyName': variety_name, 'RoastLevel': roast_level, 'GrindLevel':
-                  grind_level, 'TasteDescription': taste_desc, 'Price': price,
+            grind_level, 'TasteDescription': taste_desc, 'Price': price,
                   'PackingVolume': volume}
         return values
 
@@ -145,6 +159,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         super().setupUi(MainWindow)
         self.setWindowIcon(QtGui.QIcon('coffee.svg'))
         self.actionAddEdit.triggered.connect(self.show_add_edit_dialog)
+        self.tableCoffee.mouseDoubleClickEvent = self.tableMouseDoubleClickEvent
         self.display_table()
 
     def get_db_data(self):
@@ -185,14 +200,26 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             if reply == QtWidgets.QMessageBox.Yes:
                 self.remove_entries(rows)
 
+    def tableMouseDoubleClickEvent(self, a0: QtGui.QMouseEvent) -> None:
+        item = self.tableCoffee.itemAt(a0.pos())
+        dialog = AddEditDialog(self, self.display_table, self.con)
+        if item is not None:
+            name = self.tableCoffee.item(item.row(), 0).text()
+            cur = self.con.cursor()
+            item_id, = cur.execute("""SELECT ID FROM Coffee WHERE Name = ?""", (name,)).fetchone()
+            dialog.comboBoxMode.setCurrentText('Изменение')
+            dialog.spinBoxID.setValue(item_id)
+        else:
+            dialog.comboBoxMode.setCurrentText('Добавление')
+        dialog.exec()
+
     def remove_entries(self, rows):
-        self.tableCoffee: QtWidgets.QTableWidget
+        cur = self.con.cursor()
         for row in rows:
             name = self.tableCoffee.item(row, 0).text()
-            cur = self.con.cursor()
-            cur.execute("""DELETE FROM Coffee WHERE Name = ?""", (name, ))
-            self.tableCoffee.removeRow(row)
+            cur.execute("""DELETE FROM Coffee WHERE Name = ?""", (name,))
         self.con.commit()
+        self.display_table()
 
 
 def main():
